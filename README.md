@@ -55,6 +55,37 @@ zevtyardt, roosterkid/openproxylist, proxifly, vakhov, zloi-user/hideip.me,
 hookzof, jetkai, clarketm, gfpcom, Zaeem20, iplocate, sunny9577, MuRongPIG)
 plus the free proxyscrape API. Add more in `sources.json`.
 
+## Rotator daemon (direct-first egress rotation)
+
+`rotator.py` is a local forward proxy + OpenAI-compatible origin endpoint that
+uses your own IP by default and only switches to the fleet's proxies when your
+IP gets rate-limited:
+
+- **MODE DIRECT**: connects to the target with your own IP (best speed/reliability).
+- **MODE ROTATE**: on 429/403 (rate limit) it switches to the best-ranked proxy;
+  a proxy that fails, times out, or gets WAF-redirected (3xx) is auto-skipped;
+  after `--direct-cooldown` (default 3300s) it reclaims your own IP.
+- Host-scoped: only traffic for `--target` rotates; everything else goes direct,
+  so it is safe to set `HTTP(S)_PROXY=http://127.0.0.1:5381` globally.
+- Pool: auto-fetched from the repo's raw `lists/all.txt` every 15 min.
+
+Run it (also supervised by the agent-session keeper, survives reboots):
+
+```bash
+python3 rotator.py --listen 127.0.0.1:5381 \
+  --target api.kilo.ai --origin https://api.kilo.ai/api/gateway \
+  --list ~/.proxy-fleet/lists/all.txt
+```
+
+Ops endpoints (all `http://127.0.0.1:5381/...`):
+- `/healthz` — mode, rotation stats, pool size
+- `/ratelimit` — force-enter rotate mode now (manual "I'm limited" trigger)
+- `/dns?host=X`, `/conn?host=X` — diagnostics
+
+**OMP wiring**: point any OpenAI-compatible provider at `http://127.0.0.1:5381/v1`
+(e.g. a `kilo-rotator` provider entry mirroring `kiloproxy-lite`'s model list).
+The rotator rewrites Host and forwards to the origin with egress rotation.
+
 ## Caveats
 
 - Free proxies are flaky by nature: expect churn; hourly refresh mitigates.
