@@ -1,0 +1,3 @@
+data/pool_*.txt
+__pycache__/
+*.pyc
