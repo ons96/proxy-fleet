@@ -163,7 +163,7 @@ def main():
             h_ok, h_tot = history.get(addr, (0, 0))
             uptime = h_ok / h_tot if h_tot else passrate
             rel = 0.65 * passrate + 0.35 * uptime
-            s = max(0, min(1000, round(1000 * rel - med * 0.5)))
+            s = max(0, min(1000, round(1000 * rel - min(med, 8000) * 0.1)))
             rows.append((s, addr, med))
             history[addr] = (h_ok + len(lats), h_tot + args.probes)
         rows.sort(key=lambda r: (-r[0], r[2]))
