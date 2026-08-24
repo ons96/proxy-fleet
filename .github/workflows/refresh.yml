@@ -35,6 +35,7 @@ jobs:
             echo "No changes to lists"
           else
             git commit -m "auto: refresh proxy lists $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git pull --rebase origin main || git pull --rebase origin main
             git push
           fi
 
