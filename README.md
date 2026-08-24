@@ -45,7 +45,7 @@ python3 check.py --pool data --out lists --target api.kilo.ai --port 443 --probe
 Rotate egress IP for any API client:
 
 ```bash
-export HTTPS_PROXY=http://127.0.0.1:5382   # rotator daemon, see rotator.py
+export HTTPS_PROXY=http://127.0.0.1:5381   # rotator daemon, see rotator.py
 ```
 
 ## Sources
