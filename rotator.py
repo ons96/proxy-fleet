@@ -26,6 +26,8 @@ import asyncio
 import json
 import os
 import re
+import socket
+import ssl
 import time
 import urllib.request
 
@@ -118,6 +120,21 @@ class ProxyRelay:
         self.listen_host, self.listen_port = listen.rsplit(":", 1)
         self.listen_port = int(self.listen_port)
 
+    async def _open_direct(self, host, port, use_tls=False, timeout=10):
+        """open_connection with DNS retry (systemd-resolved EAI_AGAIN is transient)."""
+        ctx = ssl.create_default_context() if use_tls else None
+        last = None
+        for attempt in range(4):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=ctx, server_hostname=host if use_tls else None),
+                    timeout,
+                )
+            except socket.gaierror as e:
+                last = e
+                await asyncio.sleep(0.5 * (attempt + 1))
+        raise last
+
     async def handle(self, r, w):
         try:
             line = await asyncio.wait_for(r.readline(), 10)
@@ -158,7 +175,9 @@ class ProxyRelay:
             host, _, p = uri.rpartition(":")
             return host, int(p), "/"
         # origin-form: host from Host header
-        hh = host_header.decode("latin1", "replace").strip() if host_header else ""
+        hh = ""
+        if host_header:
+            hh = host_header.split(b":", 1)[1].decode("latin1", "replace").strip()
         host = hh.split(":")[0] if hh else self.listen_host
         port = 80
         if ":" in hh:
@@ -176,7 +195,7 @@ class ProxyRelay:
         up = None
         try:
             if kind == "direct":
-                up = await asyncio.wait_for(asyncio.open_connection(host, port), 10)
+                up = await self._open_direct(host, port, use_tls=False)
             else:
                 proto, addr = proxy
                 up = await self._open_proxy(proto, addr, host, port)
@@ -251,10 +270,39 @@ class ProxyRelay:
             await w.drain()
             w.close()
             return
+        if path.startswith("/conn?"):
+            q = path.split("?", 1)[1]
+            host = q.split("=", 1)[1] if "=" in q else "api.kilo.ai"
+            try:
+                ur, uw = await self._open_direct(host, 443, use_tls=True)
+                uw.close()
+                body = json.dumps({"host": host, "ok": True}).encode()
+            except Exception as e:  # noqa: BLE001
+                body = json.dumps({"host": host, "ok": False, "err": str(e), "type": type(e).__name__}).encode()
+            w.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                    str(len(body)).encode() + b"\r\n\r\n" + body)
+            await w.drain()
+            w.close()
+            return
+        if path.startswith("/dns?"):
+            q = path.split("?", 1)[1]
+            host = q.split("=", 1)[1] if "=" in q else "api.kilo.ai"
+            try:
+                infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+                body = json.dumps({"host": host, "ok": True, "ip": infos[0][4][0]}).encode()
+            except Exception as e:  # noqa: BLE001
+                body = json.dumps({"host": host, "ok": False, "err": str(e), "type": type(e).__name__}).encode()
+            w.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                    str(len(body)).encode() + b"\r\n\r\n" + body)
+            await w.drain()
+            w.close()
+            return
         to_origin = (host == self.listen_host)  # OpenAI-compatible base request
         if to_origin:
+            from urllib.parse import urlsplit as _us
+            origin_path = _us(self.origin).path or "/"
             host, port = self.target, 443
-            path = self.origin + path
+            path = origin_path + path
         target = (host == self.target)
         kind, proxy = self.router.pick() if target else ("direct", None)
 
@@ -271,19 +319,20 @@ class ProxyRelay:
         up = None
         try:
             if kind == "direct":
-                up = await asyncio.wait_for(asyncio.open_connection(host, port), 10)
+                up = await self._open_direct(host, port, use_tls=to_origin and self.origin.startswith("https://"))
             else:
                 proto, addr = proxy
                 up = await self._open_proxy(proto, addr, host, port)
-                # via HTTP proxy: absolute-form; via SOCKS: origin-form after tunnel
-                if proto == "http":
-                    path = f"http://{host}:{port}{path}"
-            req = f"{method} {path} {ver}\r\n".encode() + b"".join(headers) + b"\r\n" + body
+                # CONNECT/socks tunnels are transparent: request stays origin-form
+            req_headers = [h for h in headers if not h.lower().startswith(b"host:")]
+            req_headers.append(f"Host: {host}\r\n".encode())
+            req = f"{method} {path} {ver}\r\n".encode() + b"".join(req_headers) + b"\r\n" + body
             up[1].write(req)
             await asyncio.wait_for(up[1].drain(), 10)
 
             status_line = await asyncio.wait_for(up[0].readline(), 10)
-            status = int(status_line.split(b" ", 2)[1]) if status_line.split(b" ", 2) else 0
+            sp = status_line.split(b" ", 2)
+            status = int(sp[1]) if len(sp) > 1 else 0
             w.write(status_line)
             resp_headers = []
             while True:
@@ -304,12 +353,15 @@ class ProxyRelay:
             if target:
                 if status in (429, 403):
                     self.router.report("ratelimit", addr=proxy[1] if kind != "direct" else None)
+                elif 300 <= status < 500:
+                    # 3xx = WAF/bot-redirect, 4xx = blocked: proxy unusable, rotate
+                    self.router.report("error", addr=proxy[1] if kind != "direct" else None)
                 else:
                     self.router.report("ok", addr=proxy[1] if kind != "direct" else None)
         except Exception as e:  # noqa: BLE001
             if target:
                 self.router.report("error", addr=proxy[1] if kind != "direct" else None)
-            print(f"[rotator] HTTP {path} via {kind} failed: {e}", flush=True)
+            print(f"[rotator] HTTP {path} via {kind} failed ({host}:{port}, origin={to_origin}): {e}", flush=True)
             try:
                 w.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
                 await w.drain()

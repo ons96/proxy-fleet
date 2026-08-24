@@ -65,7 +65,12 @@ async def _tunnel(proto, addr, host, port, timeout):
 
 
 async def probe(proto, addr, host, port, timeout):
-    """One probe round: tunnel + GET; return latency ms or None."""
+    """One probe round: tunnel + GET; return latency ms or None.
+
+    Pass = any 2xx status. 3xx (bot-redirect/WAF), 4xx, 5xx, timeouts,
+    and tunnel failures all count as fail — a proxy that gets redirected
+    by the target's WAF is useless for rotation.
+    """
     try:
         conn = await _tunnel(proto, addr, host, port, timeout)
         if conn is None:
@@ -77,6 +82,12 @@ async def probe(proto, addr, host, port, timeout):
         head = await asyncio.wait_for(r.read(256), timeout)  # status line + headers = first byte
         w.close()
         if not head.startswith(b"HTTP/1"):
+            return None
+        try:
+            status = int(head.split(b" ", 2)[1])
+        except (IndexError, ValueError):
+            return None
+        if not (200 <= status < 300):
             return None
         return (time.monotonic() - t0) * 1000
     except Exception:  # noqa: BLE001
