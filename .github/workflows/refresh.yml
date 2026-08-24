@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: refresh-lists
+  cancel-in-progress: true
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
@@ -35,7 +39,11 @@ jobs:
             echo "No changes to lists"
           else
             git commit -m "auto: refresh proxy lists $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            git pull --rebase origin main || git pull --rebase origin main
+            git pull --rebase origin main || {
+              git checkout --theirs lists/ data/history.json 2>/dev/null
+              git add lists/ data/history.json
+              git rebase --continue
+            }
             git push
           fi
 
