@@ -1,10 +1,10 @@
 {
- "ts": "2026-08-24T23:46:04Z",
+ "ts": "2026-08-25T02:03:21Z",
  "target": "api.kilo.ai:443",
- "total_ok": 1798,
+ "total_ok": 1868,
  "by_proto": {
-  "http": 1792,
-  "socks4": 6,
+  "http": 1861,
+  "socks4": 7,
   "socks5": 0
  }
 }
