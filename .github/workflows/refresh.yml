@@ -37,7 +37,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           rm -rf /tmp/data-pub
-          git clone --depth 1 https://github.com/ons96/proxy-fleet-data.git /tmp/data-pub
+          git clone --depth 1 https://x-access-token:${FLEET_DATA_TOKEN}@github.com/ons96/proxy-fleet-data.git /tmp/data-pub
           mkdir -p /tmp/data-pub/data
           cp -r lists /tmp/data-pub/
           cp data/history.json /tmp/data-pub/data/ 2>/dev/null || true
