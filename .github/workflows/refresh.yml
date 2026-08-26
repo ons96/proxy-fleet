@@ -30,23 +30,22 @@ jobs:
       - name: Validate and rank proxies
         run: python3 check.py --pool data --out lists --probes 2 --workers 400 --timeout 8 --history data/history.json
 
-      - name: Commit refreshed lists
+      - name: Publish to private data repo
+        env:
+          FLEET_DATA_TOKEN: ${{ secrets.FLEET_DATA_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add lists/ data/history.json
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          rm -rf /tmp/data-pub
+          git clone --depth 1 https://github.com/ons96/proxy-fleet-data.git /tmp/data-pub
+          mkdir -p /tmp/data-pub/data
+          cp -r lists /tmp/data-pub/
+          cp data/history.json /tmp/data-pub/data/ 2>/dev/null || true
+          cd /tmp/data-pub
+          git add -A
           if git diff --cached --quiet; then
-            echo "No changes to lists"
+            echo "No changes to proxy data"
           else
             git commit -m "auto: refresh proxy lists $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            # merge origin; on data-file conflicts prefer our regenerated lists
-            git pull --no-rebase -X ours origin main
-            git push
+            git push https://x-access-token:${FLEET_DATA_TOKEN}@github.com/ons96/proxy-fleet-data.git HEAD:main
           fi
-
-      - name: Upload lists as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: proxy-lists
-          path: lists/
-          if-no-files-found: error

@@ -31,7 +31,30 @@ import ssl
 import time
 import urllib.request
 
-LIST_URL = "https://raw.githubusercontent.com/ons96/proxy-fleet/main/lists/all.txt"
+LIST_URL = "https://api.github.com/repos/ons96/proxy-fleet-data/contents/lists/all.txt"
+
+
+def _read_list_text(path):
+    """Fetch list: private repo via API+token (env or ~/.proxy-fleet/token), else local cache."""
+    token = os.environ.get("FLEET_DATA_TOKEN") or ""
+    if not token:
+        try:
+            token = open(os.path.expanduser("~/.proxy-fleet/token"), encoding="utf-8").read().strip()
+        except OSError:
+            token = ""
+    if token:
+        req = urllib.request.Request(LIST_URL, headers={
+            "User-Agent": "proxy-fleet/1.0",
+            "Accept": "application/vnd.github.raw",
+            "Authorization": f"Bearer {token}",
+        })
+        try:
+            return urllib.request.urlopen(req, timeout=20).read().decode()
+        except Exception as e:  # noqa: BLE001
+            print(f"[rotator] private list fetch failed ({e}); falling back", flush=True)
+    if os.path.exists(path):
+        return open(path, encoding="utf-8").read()
+    return None
 LINE_RE = re.compile(r"^\s*(\d+)\s+(https?|socks4|socks5)://([0-9.]+):(\d+)\s+\S+ms\s*$")
 
 
@@ -48,14 +71,7 @@ class Router:
         self.stats = {"direct": 0, "rotated": 0, "rotations": 0}
 
     def load_list(self, path):
-        text = None
-        try:
-            req = urllib.request.Request(LIST_URL, headers={"User-Agent": "proxy-fleet/1.0"})
-            text = urllib.request.urlopen(req, timeout=20).read().decode()
-        except Exception as e:  # noqa: BLE001
-            print(f"[rotator] list fetch failed ({e}); using local cache", flush=True)
-        if text is None and os.path.exists(path):
-            text = open(path, encoding="utf-8").read()
+        text = _read_list_text(path)
         if text is None:
             print("[rotator] no proxy list available", flush=True)
             return
