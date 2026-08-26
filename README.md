@@ -31,7 +31,7 @@ sources.json --(harvest.py)--> data/pool_*.txt --(check.py)--> lists/{http,socks
 re-validates, commits changed lists, and uploads them as a CI artifact.
 Raw URLs (usable directly):
 
-- https://raw.githubusercontent.com/ons96/proxy-fleet/main/lists/all.txt
+- private ons96/proxy-fleet-data repo (API + token)
 - https://raw.githubusercontent.com/ons96/proxy-fleet/main/lists/http.txt
 - https://raw.githubusercontent.com/ons96/proxy-fleet/main/lists/socks5.txt
 
@@ -67,7 +67,7 @@ IP gets rate-limited:
   after `--direct-cooldown` (default 3300s) it reclaims your own IP.
 - Host-scoped: only traffic for `--target` rotates; everything else goes direct,
   so it is safe to set `HTTP(S)_PROXY=http://127.0.0.1:5381` globally.
-- Pool: auto-fetched from the repo's raw `lists/all.txt` every 15 min.
+- Pool: auto-fetched every 15 min from private `ons96/proxy-fleet-data` (token: `~/.proxy-fleet/token` or `FLEET_DATA_TOKEN`).
 
 Run it (also supervised by the agent-session keeper, survives reboots):
 
